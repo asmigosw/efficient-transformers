@@ -8,7 +8,8 @@
 import json
 import os
 import shutil
-import subprocess
+import qaic
+import yaml
 from typing import List, Optional, Tuple
 
 from QEfficient.utils.logging_utils import logger
@@ -38,6 +39,10 @@ def create_and_dump_specializations(
     with open(path, "w") as file:
         json.dump(specializations, file, indent=4)
 
+def append_to_yaml(file_path, data_to_append):
+    with open(file_path, 'a') as file:
+        yaml_text = yaml.dump(data_to_append)
+        file.write(yaml_text)
 
 def compile_kv_model_on_cloud_ai_100(
     onnx_path: str,
@@ -51,9 +56,6 @@ def compile_kv_model_on_cloud_ai_100(
     device_group: Optional[List[int]] = None,
     **kwargs,
 ) -> Tuple[bool, str]:
-    if kwargs:
-        # FIXME
-        raise NotImplementedError("Can't handle extra compilation args now!")
     aic_binary_dir = os.path.join(base_path, "qpcs")
 
     if os.path.isdir(aic_binary_dir):
@@ -96,13 +98,40 @@ def compile_kv_model_on_cloud_ai_100(
         with open(mdp_ts_config_path, "w") as file:
             json.dump(mdp_ts_config, file, indent=4)
         command.append(f"-mdp-load-partition-config={mdp_ts_config_path}")
-    print("Running AI 100 compiler:", " ".join(command))
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Compilation Failed!!\n\nSTDOUT\n{result.stdout}\n\nSTDERR\n{result.stderr}")
+    if kwargs:
+        for key,value in kwargs.items():
+            if value:
+                command.append(f"-{key}={value}")
+            else:
+                command.append(f"-{key}")
 
+    option_file_path = '/home/asmigosw/transformers/efficient-transformers/session_option.yaml'
+    session_command = {
+        "aic_num_cores": num_cores,
+        "dev_id": 1,
+        "convert_to_fp16": True,
+        "retained_state": True,
+        "custom_io_list_file": custom_io_path,
+        "mos": mos,
+        "network_specialization_config": specializations_json,
+        "aic_enable_depth_first": True,
+        "mxfp6_matmul": True,
+        "output_dir": os.path.join(base_path, "qpcs"),
+    }
+    append_to_yaml(option_file_path, session_command)
+
+    if kwargs:
+        for key, value in kwargs.items():
+            data_to_append = {key: value}
+            append_to_yaml(option_file_path, data_to_append)
+
+    print("Running AI 100 compiler:", " ".join(command))
+
+    sess = qaic.Session(os.path.join(onnx_path),
+            options_path=option_file_path, #FixMe: Update YAML accordingly
+            )
     print("\n===================== Compilation Done! =====================\n")
-    return result.returncode == 0, aic_binary_dir
+    return True, aic_binary_dir
 
 
 def compile(
@@ -181,6 +210,7 @@ def compile(
         aic_enable_depth_first=aic_enable_depth_first,
         mos=mos,
         device_group=device_group,
+        **kwargs,
     )
 
     logger.info(f"Compiled QPC files can be found here: {qpc_path}")

@@ -35,6 +35,7 @@ def main(
     local_model_dir: Optional[str] = None,
     cache_dir: Optional[str] = None,
     hf_token: Optional[str] = None,
+    **kwargs,
 ) -> None:
     """
     1. Check if compiled qpc for given config already exists, if it does jump to execute, else
@@ -104,6 +105,7 @@ def main(
             mos=mos,
             device_group=device_group,
             full_batch_size=full_batch_size,
+            **kwargs,
         )
 
     #########
@@ -199,8 +201,16 @@ if __name__ == "__main__":
         help="Set full batch size to enable continuous batching mode, default is None",
     )
 
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+
+    unknown_args_dict = {}
+    for i in range(0, len(unknown_args)):
+        if (unknown_args[i].startswith('--')): #FixMe: Accepting all type of inputs
+            key = unknown_args[i].lstrip('-')
+            value = unknown_args[i+1] if i+1 < len(unknown_args) and not unknown_args[i+1].startswith('--') else ""
+            unknown_args_dict[key] = value
+
     if args.verbose:
         logger.setLevel(logging.INFO)
     del args.verbose  # type: ignore
-    main(**args.__dict__)
+    main(**args.__dict__, **unknown_args_dict)
