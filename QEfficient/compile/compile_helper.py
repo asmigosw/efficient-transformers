@@ -39,6 +39,10 @@ def create_and_dump_specializations(
     with open(path, "w") as file:
         json.dump(specializations, file, indent=4)
 
+def write_to_yaml(file_path, data_to_append):
+    with open(file_path, 'w') as file:
+        yaml_text = yaml.dump(data_to_append)
+        file.write(yaml_text)
 def append_to_yaml(file_path, data_to_append):
     with open(file_path, 'a') as file:
         yaml_text = yaml.dump(data_to_append)
@@ -105,7 +109,7 @@ def compile_kv_model_on_cloud_ai_100(
             else:
                 command.append(f"-{key}")
 
-    option_file_path = '/home/asmigosw/transformers/efficient-transformers/session_option.yaml'
+    option_file_path = os.path.join(base_path, "session_option.yaml")
     session_command = {
         "aic_num_cores": num_cores,
         "dev_id": 1,
@@ -115,10 +119,11 @@ def compile_kv_model_on_cloud_ai_100(
         "mos": mos,
         "network_specialization_config": specializations_json,
         "aic_enable_depth_first": True,
+        #" mdp_load_partition_config": mdp_ts_config_path,
         "mxfp6_matmul": True,
         "output_dir": os.path.join(base_path, "qpcs"),
     }
-    append_to_yaml(option_file_path, session_command)
+    write_to_yaml(option_file_path, session_command)
 
     if kwargs:
         for key, value in kwargs.items():
@@ -128,7 +133,7 @@ def compile_kv_model_on_cloud_ai_100(
     print("Running AI 100 compiler:", " ".join(command))
 
     sess = qaic.Session(os.path.join(onnx_path),
-            options_path=option_file_path, #FixMe: Update YAML accordingly
+            options_path=option_file_path,
             )
     print("\n===================== Compilation Done! =====================\n")
     return True, aic_binary_dir
