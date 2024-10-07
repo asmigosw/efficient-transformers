@@ -5,8 +5,3 @@
 #
 # -----------------------------------------------------------------------------
 
-# Default owners
-# review when someone opens a pull request and assign appropriate reviewer
-* @quic-rishinr @ochougul
-pyproject.toml @carlstreeter-quic
-
