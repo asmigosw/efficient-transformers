@@ -25,7 +25,7 @@ from transformers import (
 )
 
 import QEfficient
-from QEfficient.base.modeling_qeff import QEFFBaseModel
+
 from QEfficient.base.onnx_transforms import FP16ClipTransform, SplitTensorsTransform
 from QEfficient.base.pytorch_transforms import SplitGateUpWeightsTransform
 from QEfficient.generation.cloud_infer import QAICInferenceSession
@@ -60,6 +60,7 @@ from QEfficient.utils.cache import to_hashable
 from QEfficient.utils.logging_utils import logger
 
 
+from QEfficient.base.modeling_qeff import QEFFBaseModel
 class QEFFTransformersBase(QEFFBaseModel):
     """
     Parent class for models QEFF provides from transformers i.e. (AutoModel, AutoModelForCausalLM, AutoModelForAudioClassification etc.) from transformers/models/modeling_auto.py file.
