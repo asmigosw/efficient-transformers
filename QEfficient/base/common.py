@@ -16,6 +16,7 @@ import os
 from typing import Any
 
 from transformers import AutoConfig
+import importlib
 
 from QEfficient.base.modeling_qeff import QEFFBaseModel
 from QEfficient.transformers.modeling_utils import EXTERNAL_MODEL_CLASS_MAPPING, MODEL_CLASS_MAPPING
@@ -47,7 +48,7 @@ class QEFFCommonLoader:
             or EXTERNAL_MODEL_CLASS_MAPPING[config.__class__.__name__]
         )
         if class_name:
-            module = __import__("QEfficient.transformers.models.modeling_auto")
+            module = importlib.import_module("QEfficient.transformers.models.modeling_auto")
             model_class = getattr(module, class_name)
         else:
             raise NotImplementedError(
