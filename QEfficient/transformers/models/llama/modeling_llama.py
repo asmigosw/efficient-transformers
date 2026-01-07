@@ -226,7 +226,7 @@ class QEffLlamaAttention(LlamaAttention):
         key_states = self.k_proj(hidden_states, **kwargs).view(hidden_shape).transpose(1, 2)
         value_states = self.v_proj(hidden_states, **kwargs).view(hidden_shape).transpose(1, 2)
 
-        kv_seq_len = past_key_value.get_seq_length(self.layer_idx, cache_position)
+        kv_seq_len = past_key_value.get_seq_length(self.layer_idx)
         past_seen_tokens = past_key_value.get_seq_length() if past_key_value is not None else 0
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         query_states, key_states = qeff_apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
@@ -349,7 +349,7 @@ class QEffLlamaModel(LlamaModel):
         return_legacy_cache = False
         if use_cache and not isinstance(past_key_values, Cache):
             return_legacy_cache = True
-            past_key_values = QEffDynamicCache.from_legacy_cache(past_key_values)
+            past_key_values = QEffDynamicCache.from_legacy_cache(past_key_values, self.config)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0

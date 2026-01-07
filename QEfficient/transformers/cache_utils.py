@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from transformers.cache_utils import DynamicCache, DynamicLayer, EncoderDecoderCache, HybridCache, HybridChunkedCache
+from transformers.configuration_utils import PreTrainedConfig
 
 from QEfficient.customop import (
     CtxGatherFunc,
@@ -55,6 +56,13 @@ class InvalidIndexProvider:
 
 
 class QEffDynamicLayer(DynamicLayer):
+    # TODO: Add self.is_initialized in init and update it to True if cache is initialized
+    def get_seq_length(self) -> int:
+        """Returns the sequence length of the cached states."""
+        if self.keys is None or self.keys.numel() == 0:
+            return 0
+        return self.keys.shape[-2]
+
     def read_only(self, cache_kwargs):
         """
         Reads the `key_states` and `value_states` for the layer.
@@ -306,15 +314,99 @@ class QEffDynamicCache(DynamicCache):
 
     """
 
-    def __init__(self, ddp_cache_data: Optional[Iterable[tuple[torch.Tensor, torch.Tensor]]] = None, *args, **kwargs):
-        # Remove layer_classes if present to avoid duplicate argument
-        kwargs.pop("layer_classes", None)
+    def __init__(
+        self,
+        ddp_cache_data: Optional[Iterable[tuple[Optional[torch.Tensor], ...]]] = None,
+        config: Optional[PreTrainedConfig] = None,
+        offloading: bool = False,
+        offload_only_non_sliding: bool = False,
+    ):
+        layers = []
+        # If a config is passed, use it to infer the layer types and initialize accordingly
+        if config is not None:
+            decoder_config = config.get_text_config(decoder=True)
+            sliding_window = getattr(decoder_config, "sliding_window", None) or getattr(
+                decoder_config, "attention_chunk_size", None
+            )
+            layer_types = getattr(decoder_config, "layer_types", None)
+            if layer_types is None:
+                layer_types = [
+                    "sliding_attention" if sliding_window is not None else "full_attention"
+                    for _ in range(decoder_config.num_hidden_layers)
+                ]
+            # Some models have shared layers thus no cache is needed for them (e.g. Gemma3n)
+            if hasattr(decoder_config, "num_kv_shared_layers"):
+                layer_types = layer_types[: -decoder_config.num_kv_shared_layers]
+
+            for layer_type in layer_types:
+                # From a cache point of view, both sliding and chunked are the same in how they should behave and how many
+                # states they should return - only the mask changes to make them different at the end!
+                if layer_type in ("sliding_attention", "chunked_attention"):
+                    # layers.append(DynamicSlidingWindowLayer(sliding_window=sliding_window))
+                    layers.append(QEffDynamicLayer())
+                else:
+                    layers.append(QEffDynamicLayer())
+
+        # In this case, use the passed data to already fill in the Cache
+        if ddp_cache_data is not None:
+            # Init all the layers with the data
+            for layer_idx, kv_and_optional_sliding in enumerate(ddp_cache_data):
+                # If the config was not passed above, initialize a new cache layer for each entry of the ddp_data
+                if config is None:
+                    # kv_and_optional_sliding contains at least two elements: the key and value states. It can also
+                    # contain a third element, which is an optional sliding window tensor.
+                    sliding_window_tensor = kv_and_optional_sliding[2] if len(kv_and_optional_sliding) == 3 else None
+                    # If there is a sliding window tensor, use it to initialize the layer
+                    if sliding_window_tensor is not None:
+                        # Since the same layer is dispatched across replicas, sliding_window is the same for all
+                        sliding_window = sliding_window_tensor[0].item()
+                        # layers.append(DynamicSlidingWindowLayer(sliding_window=sliding_window))
+                    else:
+                        layers.append(DynamicLayer())
+                # Update the layer with the data
+                _, _ = layers[layer_idx].update(kv_and_optional_sliding[0], kv_and_optional_sliding[1])
+
+        # If neither of config nor ddp_data was passed, then simply lazy init a full cache of DynamicLayer
         from transformers.cache_utils import Cache  # Import here to avoid circular import
 
-        Cache.__init__(self, layer_classes=QEffDynamicLayer, *args, **kwargs)
-        if ddp_cache_data is not None:
-            for key_states, value_states in ddp_cache_data:
-                self.layers.append(QEffDynamicLayer.from_tensors(key_states, value_states))
+        if len(layers) == 0:
+            Cache.__init__(
+                self,
+                layer_class_to_replicate=QEffDynamicLayer,
+                offloading=offloading,
+                offload_only_non_sliding=offload_only_non_sliding,
+            )
+        else:
+            Cache.__init__(
+                self, layers=layers, offloading=offloading, offload_only_non_sliding=offload_only_non_sliding
+            )
+
+    def to_legacy_cache(self) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
+        """
+        Converts the `Cache` instance into the its equivalent in the legacy cache format. Used for
+        backward compatibility.
+        """
+        legacy_cache = ()
+        for layer in self.layers:
+            legacy_cache += ((layer.keys, layer.values),)
+        return legacy_cache
+
+    @classmethod
+    def from_legacy_cache(
+        cls,
+        past_key_values: tuple[tuple[torch.FloatTensor, torch.FloatTensor], ...],
+        config: Optional[PreTrainedConfig] = None,
+    ):
+        """
+        Converts a cache in the legacy cache format into an equivalent `Cache`. Used for
+        backward compatibility.
+        """
+        cache = cls(config=config)
+        if past_key_values is not None:
+            for layer_idx in range(len(past_key_values)):
+                key_states, value_states = past_key_values[layer_idx]
+                cache.update(key_states, value_states, layer_idx)
+        return cache
 
     def read_only(self, layer_idx, cache_kwargs):
         """

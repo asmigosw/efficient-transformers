@@ -23,7 +23,6 @@ from transformers.models.granitemoe.modeling_granitemoe import (
     GraniteMoeRotaryEmbedding,
     GraniteMoeTopKGating,
     load_balancing_loss_func,
-    logger,
     repeat_kv,
     rotate_half,
 )
@@ -31,6 +30,7 @@ from transformers.models.granitemoe.modeling_granitemoe import (
 from QEfficient.transformers.cache_utils import QEffDynamicCache
 from QEfficient.transformers.modeling_attn_mask_utils import _create_causal_mask
 from QEfficient.utils.constants import MIN_MASKED_ATTENTION_VALUE
+from QEfficient.utils.logging_utils import logger
 
 
 class QEffGraniteMoeRotaryEmbedding(GraniteMoeRotaryEmbedding):
